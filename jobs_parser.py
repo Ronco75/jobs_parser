@@ -2,10 +2,17 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import time
+import json
 from dotenv import load_dotenv, dotenv_values
-KEYWORDS = ["junior", "student", "intern"]
-CHECK_INTERVAL = 86400 
 load_dotenv()
+
+with open('config.json', 'r') as config_file:
+        config = json.load(config_file)
+
+KEYWORDS = config['keywords']
+CHECK_INTERVAL = config['check_interval']
+JOBS_FILE = 'previous_jobs.json'
+
 
 def send_telegram_message(message):
         url = f"https://api.telegram.org/bot{os.getenv("BOT_TOKEN")}/sendMessage"
@@ -14,48 +21,78 @@ def send_telegram_message(message):
                 "text": message,
                 "parse_mode": "HTML"
         }
-        requests.post(url, json=payload)
+        try:
+                response = requests.post(url, json=payload)
+                response.raise_for_status()
+        except requests.RequestException as e:
+                print(f"Error sending Telegram message: {e}")
 
-def check_for_jobs():
-        gev_yam_URL = "https://careers.gavyam-negev.co.il/"
-        gev_yam_response = requests.get(gev_yam_URL).content.decode('utf-8')
-        soup = BeautifulSoup(gev_yam_response, 'html.parser')
-        jobs_container = soup.find('div', class_='container oe_website_jobs')
-        job_links = jobs_container.find_all('a', class_='text-decoration-none')
-        jobs_found = []
+        
+
+def check_for_jobs(site):
+    jobs_found = []
+    try:
+        response = requests.get(site['url'])
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'html.parser')
+        jobs_container = soup.find(site['container']['tag'], class_=site['container']['class'])
+        job_links = jobs_container.find_all(site['job_link']['tag'], class_=site['job_link']['class'])
 
         for link in job_links:
-                job_url = gev_yam_URL + link['href']
-                job_title = link.find('h3', class_='text-secondary').text.strip()
-                lower_job_title = job_title.lower()
+            job_url = site['url'] + link['href']
+            job_title = link.find(site['job_title']['tag'], class_=site['job_title']['class']).text.strip()
+            lower_job_title = job_title.lower()
 
-                for keyword in KEYWORDS:
-                        if keyword in lower_job_title:
-                                jobs_found.append({
-                                "title": job_title,
-                                "url": job_url
-                        })
-                        break
+            if any(keyword in lower_job_title for keyword in KEYWORDS):
+                jobs_found.append({
+                    "title": job_title,
+                    "url": job_url,
+                    "site": site['name']
+                })
 
-        return jobs_found
+    except requests.RequestException as e:
+        print(f"Error fetching jobs from {site['name']}: {e}")
+    except Exception as e:
+        print(f"Error parsing jobs from {site['name']}: {e}")
 
+    return jobs_found
+
+def load_previous_jobs():
+      try:
+            with open(JOBS_FILE, 'r') as f:
+                  return set(tuple(job.items()) for job in json.load(f))
+      except FileNotFoundError:
+            return set()
+            
+def save_current_jobs(jobs):
+      with open(JOBS_FILE, 'w') as f:
+            json.dump(list(dict(job) for job in jobs), f)
 
 
 def main():
-        previous_jobs = set()
 
-        current_jobs = set(tuple(job.items()) for job in check_for_jobs())
-        new_jobs = current_jobs - previous_jobs
+        all_new_jobs = []
+        previous_jobs = load_previous_jobs()
+        current_jobs = set()
 
-        if new_jobs:
+        for site in config['sites']:
+                site_jobs = check_for_jobs(site)
+                site_jobs_set = set(tuple(job.items()) for job in site_jobs)
+                new_jobs = site_jobs_set - previous_jobs
+                all_new_jobs.extend(dict(job) for job in new_jobs)
+                current_jobs.update(site_jobs_set)
+
+        if all_new_jobs:
                 message = "New Jobs Found:\n\n"
-                for job in new_jobs:
-                        job_dict = dict(job)
-                        message += f"<b>{job_dict['title']}</b>\n"
-                        message += f"<a href='{job_dict['url']}'>Apply Here</a>\n\n"
-                send_telegram_message(message)
-                previous_jobs = current_jobs
+                for job in all_new_jobs:
+                        message += f"<b>{job['title']}</b>\n"
+                        message += f"<a href='{job['url']}'>Apply Here</a>\n\n"
+        else:
+                message = "No New Jobs With Your Keywords!"
+        send_telegram_message(message)
+        
+        save_current_jobs(current_jobs)
 
-                
+
 if __name__ == "__main__":
     main()

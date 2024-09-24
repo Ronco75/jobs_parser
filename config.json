@@ -1,0 +1,22 @@
+{
+    "keywords": ["junior", "student", "intern"],
+    "check_interval": 3600,
+    "sites": [
+      {
+        "name": "Gav Yam",
+        "url": "https://careers.gavyam-negev.co.il/",
+        "container": {
+          "tag": "div",
+          "class": "container oe_website_jobs"
+        },
+        "job_link": {
+          "tag": "a",
+          "class": "text-decoration-none"
+        },
+        "job_title": {
+          "tag": "h3",
+          "class": "text-secondary"
+        }
+      }
+    ]
+  }
